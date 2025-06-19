@@ -1,6 +1,8 @@
 import os
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+import re
+from collections import defaultdict
 
 app = Flask(__name__)
 CORS(app)
@@ -24,15 +26,41 @@ def upload_log():
     path = os.path.join(UPLOAD_FOLDER, file.filename)
     file.save(path)
 
-    # Basic parsing example
-    errors = []
+    error_summary = defaultdict(int)
+    error_lines = []
+    timestamped_errors = []
+
+    error_regex = re.compile(r'(.*)?(error|exception)(.*)', re.IGNORECASE)
+    timestamp_regex = re.compile(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}')
+
     with open(path, 'r') as f:
         for line in f:
-            if 'error' in line.lower():
-                errors.append(line.strip())
+            match = error_regex.search(line)
+            if match:
+                error_msg = match.group(0).strip()
+                error_lines.append(line.strip())
+
+                # Improved error type extraction
+                error_words = error_msg.split()
+                if len(error_words) >= 2:
+                    error_type = error_words[5].strip(':')
+                else:
+                    error_type = 'UnknownError'
+
+                error_summary[error_type] += 1
+
+                # Timestamp check
+                ts_match = timestamp_regex.search(line)
+                if ts_match:
+                    timestamped_errors.append({
+                        'timestamp': ts_match.group(0),
+                        'error': error_msg
+                    })
 
     return jsonify({
         'filename': file.filename,
-        'error_count': len(errors),
-        'errors': errors[:10]  # Return first 10 for now
+        'error_count': len(error_lines),
+        'error_types': dict(error_summary),
+        'recent_errors': error_lines[:10],
+        'timestamped': timestamped_errors[-10:]  # last 10 with timestamps
     })
